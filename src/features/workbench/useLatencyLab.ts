@@ -26,6 +26,12 @@ import {
   saveScenario,
   type ScenarioComparison,
 } from "../scenarios/scenarioViewModel";
+import {
+  applyLiveDiff,
+  computeLiveDiff,
+  type ApplyOutcome,
+  type LiveDiffReport,
+} from "../scenarios/liveDiff";
 import { removeProject, updateProject } from "../projects/projectViewModel";
 import { simulateProject } from "../../shared/domain/simulation";
 
@@ -45,6 +51,8 @@ export function useLatencyLab() {
     baselineId: string;
     comparisonId: string;
   }>({ baselineId: "", comparisonId: "" });
+  const [liveScenarioId, setLiveScenarioId] = useState("");
+  const [applyHistory, setApplyHistory] = useState<LatencyProject[]>([]);
   const [notice, setNotice] = useState("");
   const [persisted, setPersisted] = useState<"saving" | "saved" | "error">(
     "saved",
@@ -75,6 +83,13 @@ export function useLatencyLab() {
   const scenarioComparison: ScenarioComparison | undefined =
     baselineScenario && comparisonScenario
       ? compareScenarios(baselineScenario, comparisonScenario)
+      : undefined;
+  const liveScenario =
+    scenarioList.find((scenario) => scenario.id === liveScenarioId) ??
+    scenarioList[0];
+  const liveDiff: LiveDiffReport | undefined =
+    activeProject && liveScenario && result
+      ? computeLiveDiff(activeProject, liveScenario, result.completionMs)
       : undefined;
   const simulationValid =
     Boolean(activeProject) &&
@@ -148,6 +163,7 @@ export function useLatencyLab() {
     (id: string) => {
       const current = documentRef.current;
       if (current) commit(selectProject(current, id), "ready");
+      setApplyHistory([]);
     },
     [commit],
   );
@@ -155,6 +171,7 @@ export function useLatencyLab() {
   const newProject = useCallback(() => {
     const current = documentRef.current;
     if (current) commit(createProject(current), "editing");
+    setApplyHistory([]);
   }, [commit]);
 
   const renameActive = useCallback(
@@ -168,14 +185,16 @@ export function useLatencyLab() {
     const current = documentRef.current;
     if (current && activeProject)
       commit(duplicateProject(current, activeProject), "editing");
+    setApplyHistory([]);
   }, [activeProject, commit]);
 
   const deleteProject = useCallback(
     (id: string) => {
       const current = documentRef.current;
-      if (current && current.projects.length > 1)
+      if (current && current.projects.length > 1) {
         commit(removeProject(current, id), "editing");
-      else setNotice("至少保留一个链路项目。");
+        setApplyHistory([]);
+      } else setNotice("至少保留一个链路项目。");
     },
     [commit],
   );
@@ -261,6 +280,47 @@ export function useLatencyLab() {
     [activeProject, editProject],
   );
 
+  const applyScenarioDiff = useCallback(
+    (itemIds: string[]): ApplyOutcome | undefined => {
+      if (!activeProject || !liveScenario || !result) return undefined;
+      const diff = computeLiveDiff(
+        activeProject,
+        liveScenario,
+        result.completionMs,
+      );
+      const outcome = applyLiveDiff(
+        activeProject,
+        liveScenario,
+        itemIds,
+        diff.items,
+      );
+      if (outcome.project) {
+        setApplyHistory((history) => [...history.slice(-19), activeProject]);
+        editProject(outcome.project);
+        const skipped = outcome.entries.filter(
+          (entry) => entry.resolution === "skipped-missing",
+        ).length;
+        setNotice(
+          skipped
+            ? `已应用 ${outcome.entries.length - skipped} 项差异，${skipped} 项因对象缺失被跳过，可撤销。`
+            : `已应用 ${outcome.entries.length} 项差异，可撤销。`,
+        );
+      } else if (outcome.error) {
+        setNotice(outcome.error);
+      }
+      return outcome;
+    },
+    [activeProject, liveScenario, result, editProject],
+  );
+
+  const undoScenarioApply = useCallback(() => {
+    const previous = applyHistory.at(-1);
+    if (!previous) return;
+    setApplyHistory((history) => history.slice(0, -1));
+    editProject({ ...previous, updatedAt: Date.now() });
+    setNotice("已撤销上次方案应用。");
+  }, [applyHistory, editProject]);
+
   const retrySave = useCallback(() => {
     const current = documentRef.current;
     if (current) commit(current);
@@ -300,5 +360,11 @@ export function useLatencyLab() {
     comparisonScenario,
     scenarioComparison,
     selectComparisonScenario,
+    liveScenario,
+    liveDiff,
+    selectLiveScenario: setLiveScenarioId,
+    applyScenarioDiff,
+    undoScenarioApply,
+    canUndoApply: applyHistory.length > 0,
   };
 }

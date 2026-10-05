@@ -1,17 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
   GitCompareArrows,
+  ListChecks,
   Plus,
   RotateCcw,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import type {
   LatencyProject,
   ScenarioSnapshot,
 } from "../../shared/domain/types";
 import type { ScenarioComparison } from "./scenarioViewModel";
+import type { ApplyOutcome, LiveDiffReport } from "./liveDiff";
 
 interface Props {
   project: LatencyProject;
@@ -23,7 +26,22 @@ interface Props {
   comparisonResult?: ScenarioComparison;
   onSelectBaseline: (id: string) => void;
   onSelectComparison: (id: string) => void;
+  liveScenario?: ScenarioSnapshot;
+  liveDiff?: LiveDiffReport;
+  simulationValid: boolean;
+  onSelectLiveScenario: (id: string) => void;
+  onApplyDiff: (itemIds: string[]) => ApplyOutcome | undefined;
+  canUndoApply: boolean;
+  onUndoApply: () => void;
 }
+
+const RESOLUTION_TEXT: Record<string, string> = {
+  applied: "已应用",
+  "conflict-overwritten": "冲突 · 按方案覆盖",
+  "skipped-missing": "已跳过 · 对象缺失",
+  recreated: "已恢复节点",
+  removed: "已移除节点",
+};
 
 function formatDuration(value: number): string {
   return value < 1000
@@ -41,11 +59,40 @@ export default function ScenarioPanel({
   comparisonResult,
   onSelectBaseline,
   onSelectComparison,
+  liveScenario,
+  liveDiff,
+  simulationValid,
+  onSelectLiveScenario,
+  onApplyDiff,
+  canUndoApply,
+  onUndoApply,
 }: Props) {
   const [name, setName] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [lastOutcome, setLastOutcome] = useState<ApplyOutcome | null>(null);
   const delta = comparisonResult?.deltaMs ?? 0;
   const outcome = comparisonResult?.outcome ?? "equal";
   const changes = comparisonResult?.changes ?? [];
+
+  const liveScenarioId = liveScenario?.id ?? "";
+  useEffect(() => {
+    setSelected([]);
+    setLastOutcome(null);
+  }, [liveScenarioId]);
+
+  const liveItems = liveDiff?.items ?? [];
+  const activeSelected = selected.filter((id) =>
+    liveItems.some((item) => item.id === id),
+  );
+  const toggleItem = (id: string) => {
+    setSelected((current) =>
+      current.includes(id)
+        ? current.filter((itemId) => itemId !== id)
+        : [...current, id],
+    );
+  };
+  const budgetDelta = liveDiff?.budgetDeltaMs ?? 0;
+
   return (
     <section className="module-page scenarios-page">
       <div className="module-heading">
@@ -88,6 +135,153 @@ export default function ScenarioPanel({
         </div>
       ) : (
         <>
+          {liveDiff && (
+            <div className="live-diff">
+              <div className="live-diff-head">
+                <div className="save-icon">
+                  <ListChecks size={18} />
+                </div>
+                <div className="save-prompt">
+                  <strong>当前图 vs {liveDiff.scenarioName}</strong>
+                  <small>
+                    正在编辑的链路直接参与对比，勾选差异项即可应用或退回，无需先存快照。
+                  </small>
+                </div>
+                <select
+                  className="live-diff-select"
+                  value={liveScenarioId}
+                  onChange={(event) => onSelectLiveScenario(event.target.value)}
+                  aria-label="选择对比方案"
+                >
+                  {project.scenarios.map((scenario) => (
+                    <option key={scenario.id} value={scenario.id}>
+                      {scenario.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="live-diff-budget">
+                <div>
+                  <span>当前推演</span>
+                  <strong>
+                    {simulationValid
+                      ? formatDuration(liveDiff.currentCompletionMs)
+                      : "待修复链路"}
+                  </strong>
+                </div>
+                <div className="live-diff-gap">
+                  <span>完成预算差距</span>
+                  <strong
+                    className={
+                      budgetDelta > 0
+                        ? "delta-bad"
+                        : budgetDelta < 0
+                          ? "delta-good"
+                          : ""
+                    }
+                  >
+                    {budgetDelta > 0 ? (
+                      <ArrowUpRight size={14} />
+                    ) : budgetDelta < 0 ? (
+                      <ArrowDownRight size={14} />
+                    ) : null}
+                    {formatDuration(Math.abs(budgetDelta))}
+                  </strong>
+                  <small>
+                    {budgetDelta > 0
+                      ? "当前图超出方案预算"
+                      : budgetDelta < 0
+                        ? "当前图优于方案预算"
+                        : "与方案预算持平"}
+                  </small>
+                </div>
+                <div>
+                  <span>方案预算</span>
+                  <strong>
+                    {formatDuration(liveDiff.scenarioCompletionMs)}
+                  </strong>
+                </div>
+              </div>
+              {liveItems.length ? (
+                <div className="diff-item-list">
+                  {liveItems.map((item) => (
+                    <label
+                      className={`diff-item${
+                        item.kind === "node-added" ||
+                        item.kind === "node-removed"
+                          ? " diff-item-struct"
+                          : ""
+                      }`}
+                      key={item.id}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={activeSelected.includes(item.id)}
+                        onChange={() => toggleItem(item.id)}
+                      />
+                      <span className="diff-item-label">{item.label}</span>
+                      <span className="diff-item-values">
+                        <em>{item.currentLabel}</em>
+                        <i>→</i>
+                        <b>{item.scenarioLabel}</b>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="diff-empty">
+                  当前图与该方案参数一致，没有差异项。
+                </p>
+              )}
+              <div className="live-diff-actions">
+                <button
+                  className="button button-neutral"
+                  disabled={!liveItems.length}
+                  onClick={() => setSelected(liveItems.map((item) => item.id))}
+                >
+                  全选
+                </button>
+                <button
+                  className="button button-neutral"
+                  disabled={!activeSelected.length}
+                  onClick={() => setSelected([])}
+                >
+                  清空
+                </button>
+                <button
+                  className="button button-primary"
+                  disabled={!activeSelected.length}
+                  onClick={() => {
+                    const result = onApplyDiff(activeSelected);
+                    if (result) setLastOutcome(result);
+                  }}
+                >
+                  应用 {activeSelected.length || ""} 项到当前图
+                </button>
+                {canUndoApply && (
+                  <button className="button button-lime" onClick={onUndoApply}>
+                    <Undo2 size={13} /> 撤销上次应用
+                  </button>
+                )}
+              </div>
+              {lastOutcome && (
+                <div
+                  className={`apply-result${lastOutcome.error ? " apply-failed" : ""}`}
+                >
+                  <strong>
+                    {lastOutcome.error ? "应用未生效" : "本次应用取舍结果"}
+                  </strong>
+                  {lastOutcome.error && <span>{lastOutcome.error}</span>}
+                  {lastOutcome.entries.map((entry) => (
+                    <span key={entry.itemId}>
+                      {entry.label} · {RESOLUTION_TEXT[entry.resolution]}
+                      {entry.detail ? `（${entry.detail}）` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="compare-selectors">
             <div>
               <span className="compare-label">基准方案</span>

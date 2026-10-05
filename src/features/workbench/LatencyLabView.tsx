@@ -175,6 +175,13 @@ export default function LatencyLabView() {
               onSelectComparison={(id) =>
                 vm.selectComparisonScenario("comparisonId", id)
               }
+              liveScenario={vm.liveScenario}
+              liveDiff={vm.liveDiff}
+              simulationValid={vm.simulationValid}
+              onSelectLiveScenario={vm.selectLiveScenario}
+              onApplyDiff={vm.applyScenarioDiff}
+              canUndoApply={vm.canUndoApply}
+              onUndoApply={vm.undoScenarioApply}
             />
           )}
           {vm.module === "archive" && (
