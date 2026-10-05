@@ -17,6 +17,7 @@ import SimulationPanel from "../simulation/SimulationPanel";
 import ScenarioPanel from "../scenarios/ScenarioPanel";
 import ArchivePanel from "../archive/ArchivePanel";
 import Sidebar, { type NavigationItem } from "./Sidebar";
+import { LIVE_VIEW_ID } from "../../shared/domain/liveDiff";
 
 const navigation: NavigationItem[] = [
   { id: "projects", label: "链路项目", sublabel: "PROJECTS", icon: Boxes },
@@ -175,6 +176,25 @@ export default function LatencyLabView() {
               onSelectComparison={(id) =>
                 vm.selectComparisonScenario("comparisonId", id)
               }
+              baselineId={
+                vm.baselineIsLive
+                  ? LIVE_VIEW_ID
+                  : (vm.baselineScenario?.id ?? "")
+              }
+              comparisonId={
+                vm.comparisonIsLive
+                  ? LIVE_VIEW_ID
+                  : (vm.comparisonScenario?.id ?? "")
+              }
+              baselineIsLive={vm.baselineIsLive}
+              comparisonIsLive={vm.comparisonIsLive}
+              liveDiff={vm.liveGraphDiff}
+              liveDiffScenarioName={vm.liveDiffScenarioName}
+              canUndoApply={vm.canUndoApply}
+              undoLabel={vm.undoLabel}
+              onPlan={vm.planLiveApplication}
+              onApply={vm.applyLiveDiff}
+              onUndo={vm.undoLastApply}
             />
           )}
           {vm.module === "archive" && (

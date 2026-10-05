@@ -1956,6 +1956,202 @@ button:disabled {
   color: #93a187;
   font: 8px var(--mono);
 }
+.side-live-hint {
+  display: block;
+  margin-top: 5px;
+  color: #7b9458;
+  font-size: 8px;
+}
+.delta-flat {
+  color: #8a948b;
+  font: 600 13px var(--mono);
+}
+.delta-card > strong small {
+  margin-left: 4px;
+  font: 8px var(--mono);
+  font-weight: 400;
+}
+.live-diff-section {
+  margin: 2px 0 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.diff-toolbar {
+  align-items: center;
+  gap: 10px;
+}
+.diff-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.diff-select-all input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.diff-actions {
+  display: flex;
+  gap: 8px;
+}
+.diff-actions .button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.diff-list {
+  border-top: 1px solid #f0f2ee;
+}
+.diff-row {
+  display: grid;
+  grid-template-columns: 30px minmax(110px, 1.1fr) minmax(70px, 0.7fr) 2fr;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 15px;
+  border-bottom: 1px solid #f3f5f1;
+  cursor: pointer;
+}
+.diff-row:last-child {
+  border-bottom: 0;
+}
+.diff-row input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.diff-row:hover {
+  background: #fafcf7;
+}
+.diff-row-head {
+  padding: 8px 15px;
+  background: #f7f9f3;
+  cursor: default;
+  color: #98a197;
+  font: 8px var(--mono);
+}
+.diff-row-head:hover {
+  background: #f7f9f3;
+}
+.diff-row-head .diff-values em {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #98a197;
+  font-style: normal;
+}
+.diff-node {
+  color: #46534a;
+  font-size: 9px;
+  font-weight: 600;
+}
+.diff-field {
+  color: #8b958c;
+  font-size: 8px;
+}
+.diff-presence.added {
+  color: #6f9843;
+}
+.diff-presence.removed {
+  color: #bd7765;
+}
+.diff-values {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #b6bdb4;
+  font-size: 8px;
+}
+.diff-values em {
+  font-style: normal;
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+.diff-current {
+  color: #9a7163;
+  background: #f9f0ed;
+}
+.diff-other {
+  color: #5e7a44;
+  background: #f0f5e8;
+}
+.diff-empty {
+  padding: 26px 18px;
+  color: #8f998f;
+  font-size: 9px;
+  text-align: center;
+  border-top: 1px solid #f0f2ee;
+}
+.diff-footnote {
+  padding: 10px 15px;
+  color: #a2aba2;
+  background: #fafbf7;
+  border-top: 1px solid #f0f2ee;
+  font-size: 8px;
+  line-height: 1.7;
+}
+.apply-error {
+  margin: 0 15px 12px;
+}
+.same-side-note {
+  padding: 20px;
+  margin-bottom: 14px;
+}
+.conflict-dialog {
+  max-width: 560px;
+  width: 560px;
+  text-align: left;
+}
+.conflict-icon {
+  color: #bd7765 !important;
+  background: #f9f0ed !important;
+}
+.conflict-dialog h2,
+.conflict-dialog > p {
+  text-align: left;
+}
+.conflict-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.conflict-item {
+  padding: 11px 13px;
+  border: 1px solid #e9ede6;
+  border-radius: 8px;
+}
+.conflict-item legend {
+  padding: 0 5px;
+  color: #a5664f;
+  font-size: 9px;
+  font-weight: 600;
+}
+.conflict-item p {
+  margin: 2px 0 9px;
+  color: #7c867d;
+  font-size: 8px;
+  line-height: 1.6;
+}
+.conflict-options {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.conflict-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #556158;
+  font-size: 9px;
+  cursor: pointer;
+}
+.conflict-options input {
+  accent-color: #6f9843;
+}
 .storage-overview {
   display: flex;
   align-items: center;
@@ -2531,5 +2727,27 @@ button:disabled {
   .project-footnote {
     align-items: flex-start;
     line-height: 1.5;
+  }
+  .diff-row {
+    grid-template-columns: 26px 1fr;
+    gap: 4px 8px;
+    padding: 9px 12px;
+  }
+  .diff-row .diff-values {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
+  .diff-row-head {
+    display: none;
+  }
+  .conflict-dialog {
+    width: calc(100vw - 32px);
+  }
+  .diff-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .diff-actions {
+    justify-content: flex-end;
   }
 }

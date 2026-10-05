@@ -26,6 +26,20 @@ import {
   saveScenario,
   type ScenarioComparison,
 } from "../scenarios/scenarioViewModel";
+import {
+  buildGraphDiff,
+  commitGraphApplication,
+  createLiveView,
+  createSnapshotView,
+  LIVE_VIEW_ID,
+  planGraphApplication,
+  undoGraphApplication,
+  type ApplicationPlan,
+  type ConflictResolution,
+  type GraphDiff,
+  type GraphView,
+  type InverseRule,
+} from "../../shared/domain/liveDiff";
 import { removeProject, updateProject } from "../projects/projectViewModel";
 import { simulateProject } from "../../shared/domain/simulation";
 
@@ -44,13 +58,17 @@ export function useLatencyLab() {
   const [comparisonIds, setComparisonIds] = useState<{
     baselineId: string;
     comparisonId: string;
-  }>({ baselineId: "", comparisonId: "" });
+  }>({ baselineId: LIVE_VIEW_ID, comparisonId: "" });
   const [notice, setNotice] = useState("");
   const [persisted, setPersisted] = useState<"saving" | "saved" | "error">(
     "saved",
   );
   const queue = useRef(Promise.resolve());
   const revision = useRef(0);
+  // 应用方案差异后的撤销记录；一旦用户手动改图就作废，避免回滚覆盖新编辑。
+  const undoStack = useRef<
+    { projectId: string; label: string; inverse: InverseRule[] }[]
+  >([]);
   const activeProject =
     document?.projects.find(
       (project) => project.id === document.activeProjectId,
@@ -64,18 +82,53 @@ export function useLatencyLab() {
     [activeProject],
   );
   const scenarioList = activeProject?.scenarios ?? [];
+  const resolveScenario = (id: string, fallbackIndex: number) =>
+    scenarioList.find((scenario) => scenario.id === id) ??
+    scenarioList[fallbackIndex];
   const baselineScenario =
-    scenarioList.find((scenario) => scenario.id === comparisonIds.baselineId) ??
-    scenarioList[1] ??
-    scenarioList[0];
+    comparisonIds.baselineId === LIVE_VIEW_ID
+      ? undefined
+      : resolveScenario(comparisonIds.baselineId, 1);
   const comparisonScenario =
-    scenarioList.find(
-      (scenario) => scenario.id === comparisonIds.comparisonId,
-    ) ?? scenarioList[0];
+    comparisonIds.comparisonId === LIVE_VIEW_ID
+      ? undefined
+      : resolveScenario(comparisonIds.comparisonId, 0);
+  const baselineIsLive = comparisonIds.baselineId === LIVE_VIEW_ID;
+  const comparisonIsLive = comparisonIds.comparisonId === LIVE_VIEW_ID;
   const scenarioComparison: ScenarioComparison | undefined =
     baselineScenario && comparisonScenario
       ? compareScenarios(baselineScenario, comparisonScenario)
       : undefined;
+
+  const liveView: GraphView | undefined = activeProject
+    ? createLiveView(activeProject, mode)
+    : undefined;
+  const baselineView: GraphView | undefined = baselineIsLive
+    ? liveView
+    : baselineScenario
+      ? createSnapshotView(baselineScenario)
+      : undefined;
+  const comparisonView: GraphView | undefined = comparisonIsLive
+    ? liveView
+    : comparisonScenario
+      ? createSnapshotView(comparisonScenario)
+      : undefined;
+  // 差异视角固定为「方案 → 当前图」：live 在哪一侧就把它放到 current 位。
+  const liveGraphDiff: GraphDiff | undefined =
+    liveView &&
+    baselineView &&
+    comparisonView &&
+    (baselineIsLive || comparisonIsLive)
+      ? comparisonIsLive
+        ? buildGraphDiff(liveView, baselineView)
+        : buildGraphDiff(liveView, comparisonView)
+      : undefined;
+  const liveDiffScenarioName = comparisonIsLive
+    ? (baselineScenario?.name ?? "")
+    : (comparisonScenario?.name ?? "");
+  const undoEntry = undoStack.current[undoStack.current.length - 1];
+  const canUndoApply =
+    Boolean(activeProject) && undoEntry?.projectId === activeProject?.id;
   const simulationValid =
     Boolean(activeProject) &&
     result?.entries.length === activeProject?.nodes.length;
@@ -86,6 +139,30 @@ export function useLatencyLab() {
     },
     [],
   );
+
+  // 切换项目后，把指向不存在快照的选择修正到该项目的默认可用值。
+  const activeProjectId = activeProject?.id;
+  const scenarioVersion = scenarioList.map((scenario) => scenario.id).join("|");
+  useEffect(() => {
+    if (!activeProjectId) return;
+    setComparisonIds((current) => {
+      const ids = new Set(scenarioVersion ? scenarioVersion.split("|") : []);
+      const fix = (id: string, preferLive: boolean): string => {
+        if (id === LIVE_VIEW_ID) return LIVE_VIEW_ID;
+        if (ids.has(id)) return id;
+        if (preferLive && ids.size) return LIVE_VIEW_ID;
+        return [...ids][0] ?? LIVE_VIEW_ID;
+      };
+      const baseline = fix(current.baselineId, true);
+      const comparison = fix(current.comparisonId, false);
+      if (
+        baseline === current.baselineId &&
+        comparison === current.comparisonId
+      )
+        return current;
+      return { baselineId: baseline, comparisonId: comparison };
+    });
+  }, [activeProjectId, scenarioVersion]);
 
   useEffect(() => {
     let mounted = true;
@@ -144,6 +221,25 @@ export function useLatencyLab() {
     [commit],
   );
 
+  // 手动编辑会让应用撤销记录失效；方案应用/撤销本身走 commitProjectChange 保留它。
+  const manualEdit = useCallback(
+    (project: LatencyProject) => {
+      undoStack.current = undoStack.current.filter(
+        (entry) => entry.projectId !== project.id,
+      );
+      editProject(project);
+    },
+    [editProject],
+  );
+
+  const commitProjectChange = useCallback(
+    (project: LatencyProject) => {
+      const current = documentRef.current;
+      if (current) commit(updateProject(current, project));
+    },
+    [commit],
+  );
+
   const chooseProject = useCallback(
     (id: string) => {
       const current = documentRef.current;
@@ -181,35 +277,34 @@ export function useLatencyLab() {
   );
 
   const addNode = useCallback(() => {
-    if (activeProject) editProject(addRequestNode(activeProject));
-  }, [activeProject, editProject]);
+    if (activeProject) manualEdit(addRequestNode(activeProject));
+  }, [activeProject, manualEdit]);
   const patchNode = useCallback(
     (id: string, patch: Parameters<typeof patchRequestNode>[2]) => {
-      if (activeProject)
-        editProject(patchRequestNode(activeProject, id, patch));
+      if (activeProject) manualEdit(patchRequestNode(activeProject, id, patch));
     },
-    [activeProject, editProject],
+    [activeProject, manualEdit],
   );
   const deleteNode = useCallback(
     (id: string) => {
-      if (activeProject) editProject(removeRequestNode(activeProject, id));
+      if (activeProject) manualEdit(removeRequestNode(activeProject, id));
     },
-    [activeProject, editProject],
+    [activeProject, manualEdit],
   );
   const setNodeDependency = useCallback(
     (id: string, dependencyId: string) => {
       if (!activeProject) return;
       const outcome = toggleDependency(activeProject, id, dependencyId);
       if (outcome.error) setNotice(outcome.error);
-      else editProject(outcome.project);
+      else manualEdit(outcome.project);
     },
-    [activeProject, editProject],
+    [activeProject, manualEdit],
   );
   const setLimit = useCallback(
     (limit: number | null) => {
-      if (activeProject) editProject(setConcurrency(activeProject, limit));
+      if (activeProject) manualEdit(setConcurrency(activeProject, limit));
     },
-    [activeProject, editProject],
+    [activeProject, manualEdit],
   );
 
   const simulate = useCallback(
@@ -239,7 +334,7 @@ export function useLatencyLab() {
       const next = saveScenario(activeProject, result, name);
       editProject(next);
       setComparisonIds({
-        baselineId: next.scenarios[1]?.id ?? next.scenarios[0]?.id ?? "",
+        baselineId: LIVE_VIEW_ID,
         comparisonId: next.scenarios[0]?.id ?? "",
       });
       setNotice("方案快照已保存。");
@@ -256,10 +351,77 @@ export function useLatencyLab() {
   );
   const restoreSavedScenario = useCallback(
     (id: string) => {
-      if (activeProject) editProject(restoreScenario(activeProject, id));
+      if (activeProject) {
+        undoStack.current = undoStack.current.filter(
+          (entry) => entry.projectId !== activeProject.id,
+        );
+        editProject(restoreScenario(activeProject, id));
+      }
     },
     [activeProject, editProject],
   );
+
+  const planLiveApplication = useCallback(
+    (selectedIds: string[]): ApplicationPlan | undefined => {
+      if (!activeProject || !liveGraphDiff) return undefined;
+      return planGraphApplication(
+        activeProject,
+        liveGraphDiff,
+        selectedIds,
+        mode,
+      );
+    },
+    [activeProject, liveGraphDiff, mode],
+  );
+
+  const applyLiveDiff = useCallback(
+    (
+      selectedIds: string[],
+      resolutions: Record<string, ConflictResolution>,
+    ): { ok: boolean; error?: string } => {
+      if (!activeProject || !liveGraphDiff)
+        return { ok: false, error: "没有可应用的差异。" };
+      const outcome = commitGraphApplication(
+        activeProject,
+        liveGraphDiff,
+        selectedIds,
+        resolutions,
+        mode,
+      );
+      if (!outcome.project) return { ok: false, error: outcome.error };
+      undoStack.current.push({
+        projectId: activeProject.id,
+        label: liveDiffScenarioName,
+        inverse: outcome.inverse,
+      });
+      if (undoStack.current.length > 10) undoStack.current.shift();
+      // 推演结果与保存状态随这一次原子提交同步更新。
+      commitProjectChange(outcome.project);
+      setNotice(
+        `已将 ${selectedIds.length} 项差异应用到当前图，推演结果已同步更新。`,
+      );
+      return { ok: true };
+    },
+    [
+      activeProject,
+      liveGraphDiff,
+      liveDiffScenarioName,
+      mode,
+      commitProjectChange,
+    ],
+  );
+
+  const undoLastApply = useCallback(() => {
+    if (!activeProject) return;
+    const entry = undoStack.current[undoStack.current.length - 1];
+    if (!entry || entry.projectId !== activeProject.id) return;
+    const reverted = undoGraphApplication(activeProject, entry.inverse);
+    undoStack.current.pop();
+    commitProjectChange(reverted);
+    setNotice(
+      entry.label ? `已撤销自「${entry.label}」的应用。` : "已撤销上一次应用。",
+    );
+  }, [activeProject, commitProjectChange]);
 
   const retrySave = useCallback(() => {
     const current = documentRef.current;
@@ -300,5 +462,14 @@ export function useLatencyLab() {
     comparisonScenario,
     scenarioComparison,
     selectComparisonScenario,
+    liveGraphDiff,
+    liveDiffScenarioName,
+    baselineIsLive,
+    comparisonIsLive,
+    planLiveApplication,
+    applyLiveDiff,
+    undoLastApply,
+    canUndoApply,
+    undoLabel: undoEntry?.label ?? "",
   };
 }
